@@ -3,6 +3,7 @@ import tkinter
 import os
 import re
 import bisect
+import win32file
 
 parser = argparse.ArgumentParser(description="Demangle Unity Mono callstacks")
 parser.add_argument("-p", "--pmip", metavar="PMIP_PATH")
@@ -21,14 +22,35 @@ def find_pmip_paths():
         for f in os.listdir(temp_dir)
         if pmip_pattern.match(f) ]
 
-# The pmip file is sometimes locked, so keep opening candidates until one succeeds,
-# such as if the user made a manual copy
+# The pmip file is created with FILE_FLAG_DELETE_ON_CLOSE, which means
+# we must open it with FILE_SHARE_DELETE.
+def read_with_share_delete(filepath):
+    h = win32file.CreateFile(filepath,
+                             win32file.GENERIC_READ,
+                             win32file.FILE_SHARE_READ |
+                             win32file.FILE_SHARE_WRITE |
+                             win32file.FILE_SHARE_DELETE,
+                             None,
+                             win32file.OPEN_EXISTING,
+                             0,
+                             0)
+
+    if h != win32file.INVALID_HANDLE_VALUE:
+        try:
+            size = win32file.GetFileSize(h)
+            hr, contents = win32file.ReadFile(h, size, None)
+            if hr != 0:
+                raise Exception("Failed to ReadFile")
+            return contents.decode('utf-8').splitlines()
+        except:
+            win32file.CloseHandle(h)
+    else:
+        raise Exception("Failed to CreateFile")
 
 def read_pmip_file(pmip_paths):
     for p in pmip_paths:
         try:
-            with open(p, 'r') as f:
-                return f.readlines()
+            return read_with_share_delete(p)
         except:
             pass
 
@@ -88,6 +110,10 @@ for l in callstack_lines:
 
     output.append(l)
 
+if callstack_from_clipboard:
+    print("""CALLSTACK FROM CLIPBOARD
+--------
+""")
 
 for l in output:
     print(l)
